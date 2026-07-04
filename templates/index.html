@@ -1,56 +1,72 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Neural Style Transfer</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/preview.css">
 </head>
 <body>
-    <div class="container mt-5">
-        <h1 class="text-center mb-4">Neural Style Transfer</h1>
+    <div class="container">
+        <h1 class="mb-4">Neural Style Transfer</h1>
         
         <div class="row justify-content-center">
-            <div class="col-md-8">
-                <div class="card shadow">
+            <div class="col-lg-8">
+                <div class="card">
                     <div class="card-body">
                         <form action="/transfer" method="post" enctype="multipart/form-data">
-                            <div class="row mb-3">
+                            <div class="row g-3">
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="content_image" class="form-label">Content Image</label>
-                                        <input type="file" class="form-control" id="content_image" name="content_image" accept="image/*" required>
+                                        <div class="input-group">
+                                            <input type="file" class="form-control" id="content_image" name="content_image" accept="image/*" required>
+                                            <span class="input-group-text"><i class="bi bi-image"></i></span>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="style_image" class="form-label">Style Image</label>
-                                        <input type="file" class="form-control" id="style_image" name="style_image" accept="image/*" required>
+                                        <div class="input-group">
+                                            <input type="file" class="form-control" id="style_image" name="style_image" accept="image/*" required>
+                                            <span class="input-group-text"><i class="bi bi-palette"></i></span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                             
-                            <div class="row mb-3">
+                            <div class="row g-3 mt-2">
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="steps" class="form-label">Steps (10-1000)</label>
-                                        <input type="number" class="form-control" id="steps" name="steps" 
-                                               min="10" max="1000" value="200">
+                                        <div class="input-group">
+                                            <input type="number" class="form-control" id="steps" name="steps" 
+                                                   min="10" max="1000" value="200">
+                                            <span class="input-group-text"><i class="bi bi-gear"></i></span>
+                                        </div>
+                                        <div class="form-text">Number of optimization iterations</div>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="style_strength" class="form-label">Style Strength (0.0-1.0)</label>
-                                        <input type="number" class="form-control" id="style_strength" name="style_strength" 
-                                               min="0.0" max="1.0" step="0.1" value="1.0">
+                                        <div class="input-group">
+                                            <input type="number" class="form-control" id="style_strength" name="style_strength" 
+                                                   min="0.0" max="1.0" step="0.1" value="1.0">
+                                            <span class="input-group-text"><i class="bi bi-sliders"></i></span>
+                                        </div>
+                                        <div class="form-text">How strongly to apply the style</div>
                                     </div>
                                 </div>
                             </div>
                             
-                            <div class="text-center">
-                                <button type="submit" class="btn btn-primary btn-lg">
-                                    <i class="bi bi-magic"></i> Apply Style Transfer
+                            <div class="text-center mt-4">
+                                <button type="submit" class="btn btn-primary btn-lg px-4">
+                                    <i class="bi bi-magic me-2"></i> Apply Style Transfer
                                 </button>
                             </div>
                         </form>
@@ -63,25 +79,36 @@
         <div class="row mt-5">
             <div class="col-12">
                 <h2 class="text-center mb-4">Result</h2>
-                <div class="card shadow result-card">
+                <div class="card result-card">
                     <div class="card-body">
-                        <div class="row">
+                        <div class="row g-4">
                             <div class="col-md-4 text-center">
                                 <h4>Content Image</h4>
-                                <img src="{{ original_content }}" alt="Content Image" class="img-fluid rounded">
+                                <div class="image-container">
+                                    <img src="{{ original_content }}" alt="Content Image" class="img-fluid">
+                                </div>
                             </div>
                             <div class="col-md-4 text-center">
                                 <h4>Style Image</h4>
-                                <img src="{{ original_style }}" alt="Style Image" class="img-fluid rounded">
+                                <div class="image-container">
+                                    <img src="{{ original_style }}" alt="Style Image" class="img-fluid">
+                                </div>
                             </div>
                             <div class="col-md-4 text-center">
                                 <h4>Result</h4>
-                                <img src="{{ result_image }}" alt="Styled Result" class="img-fluid rounded">
+                                <div class="image-container">
+                                    <!-- Добавляем /results/ если его нет -->
+                                    {% if result_image.startswith('/results/') %}
+                                        <img src="{{ result_image }}?t={{ timestamp }}" alt="Styled Result" class="img-fluid rounded" id="result-img" onerror="showResultError()">
+                                    {% else %}
+                                        <img src="/results/{{ result_image }}?t={{ timestamp }}" alt="Styled Result" class="img-fluid rounded" id="result-img" onerror="showResultError()">
+                                    {% endif %}
+                                </div>
                             </div>
                         </div>
-                        <div class="text-center mt-3">
-                            <a href="{{ result_image }}" class="btn btn-success" download>
-                                <i class="bi bi-download"></i> Download Result
+                        <div class="text-center mt-4">
+                            <a href="{{ result_image }}" class="btn btn-success px-4" download>
+                                <i class="bi bi-download me-2"></i> Download Result
                             </a>
                         </div>
                     </div>
@@ -89,8 +116,54 @@
             </div>
         </div>
         {% endif %}
+        
+        <script>
+            function showResultError() {
+                const resultImg = document.getElementById('result-img');
+                if (resultImg) {
+                    resultImg.style.display = 'none';
+                    const container = resultImg.closest('.image-container');
+                    if (container) {
+                        container.innerHTML = `
+                            <div class="alert alert-danger">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                Result image not found
+                                <div class="mt-2">
+                                    <button class="btn btn-sm btn-outline-light" onclick="window.location.reload()">
+                                        <i class="bi bi-arrow-clockwise me-1"></i> Retry
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+            }
+            
+            // Проверяем, есть ли параметр result в URL
+            document.addEventListener('DOMContentLoaded', function() {
+                const urlParams = new URLSearchParams(window.location.search);
+                const resultParam = urlParams.get('result');
+                
+                if (resultParam) {
+                    console.log(`Result parameter found: ${resultParam}`);
+                    const resultImg = document.getElementById('result-img');
+                    if (resultImg) {
+                        // Проверяем, загружается ли изображение
+                        resultImg.onload = function() {
+                            console.log('Result image loaded successfully');
+                        };
+                        
+                        resultImg.onerror = function() {
+                            console.error('Failed to load result image');
+                            showResultError();
+                        };
+                    }
+                }
+            });
+        </script>
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/preview.js"></script>
 </body>
 </html>

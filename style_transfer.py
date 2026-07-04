@@ -158,7 +158,7 @@ class HighQualityStyleTransfer:
         rgb = torch.matmul(yuv_reshaped, transform.t())
         return rgb.clamp(0, 1).reshape(b, h, w, 3).permute(0, 3, 1, 2)
 
-    def transfer(self, content_path, style_path, steps=200, style_strength: float = 1.0):
+    def transfer(self, content_path, style_path, steps=200, style_strength: float = 1.0, callback=None):
         """
         Выполняет перенос стиля с одного изображения на другое.
         
@@ -167,6 +167,7 @@ class HighQualityStyleTransfer:
             style_path: Путь к изображению стиля
             steps: Количество итераций оптимизации
             style_strength: Сила стилизации (0.0-1.0), где 0 - сохраняет оригинальные цвета
+            callback: Функция обратного вызова для обновления прогресса (current_step, total_steps)
         
         Returns:
             Тензор с результатом стилизации
@@ -217,6 +218,10 @@ class HighQualityStyleTransfer:
 
                 with torch.no_grad():
                     output.clamp_(0, 1)
+
+                # Вызываем callback для обновления прогресса
+                if callback and i % max(1, steps // 20) == 0:  # Обновляем прогресс примерно 20 раз
+                    callback(i + 1, steps)
 
                 if i % 50 == 0:
                     logger.info(f"Step {i}, Loss: {total_loss.item():.2f}")

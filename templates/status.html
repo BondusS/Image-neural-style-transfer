@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Style Transfer - Processing</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/preview.css">
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">Style Transfer in Progress</h1>
+        
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <h4>Content Image</h4>
+                                <div class="image-container">
+                                    <img src="{{ content_image }}" alt="Content Image" class="img-fluid">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <h4>Style Image</h4>
+                                <div class="image-container">
+                                    <img src="{{ style_image }}" alt="Style Image" class="img-fluid">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="progress mb-4" style="height: 30px;">
+                            <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar" style="width: {{ progress }}%;" aria-valuenow="{{ progress }}" 
+                                 aria-valuemin="0" aria-valuemax="100">
+                                {{ progress }}%
+                            </div>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between mb-4">
+                            <div>
+                                <i class="bi bi-hourglass-split me-2"></i>
+                                <span id="status-text">{{ status|capitalize }}</span>
+                            </div>
+                            <div>
+                                <i class="bi bi-cpu me-2"></i>
+                                <span>Using MPS acceleration</span>
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle me-2"></i>
+                            The style transfer process may take several minutes depending on the number of steps selected.
+                            You can leave this page open or come back later to check the progress.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Функция для обновления статуса
+        function updateStatus() {
+            fetch(`/task-status/{{ task_id }}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Task status update:', data);
+                    
+                    // Обновляем прогресс-бар
+                    const progressBar = document.getElementById('progress-bar');
+                    progressBar.style.width = data.progress + '%';
+                    progressBar.setAttribute('aria-valuenow', data.progress);
+                    progressBar.textContent = data.progress + '%';
+                    
+                    // Обновляем статус
+                    const statusText = document.getElementById('status-text');
+                    statusText.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+                    
+                    // Если задача завершена, перенаправляем на результат
+                    if (data.status === 'completed') {
+                        if (data.result_filename) {
+                            console.log(`Redirecting to result: /?result=${data.result_filename}`);
+                            window.location.href = `/?result=${data.result_filename}`;
+                        } else if (data.result_path) {
+                            const resultPath = data.result_path.split('/').pop();
+                            console.log(`Redirecting to result: /?result=${resultPath}`);
+                            window.location.href = `/?result=${resultPath}`;
+                        } else {
+                            console.error('No result path in response:', data);
+                            showError('No result path received from server');
+                        }
+                    }
+                    
+                    // Если задача завершилась с ошибкой
+                    if (data.status === 'failed') {
+                        console.error('Task failed:', data.error);
+                        showError(data.error || 'Style transfer failed');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching status:', error);
+                    showError('Error checking task status: ' + error.message);
+                });
+        }
+        
+        // Функция для отображения ошибок
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'alert alert-danger mt-3';
+            errorDiv.innerHTML = `
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                ${message}
+                <button type="button" class="btn btn-sm btn-outline-light ms-3" onclick="window.location.href='/'">
+                    <i class="bi bi-arrow-left me-1"></i> Back to Home
+                </button>
+            `;
+            
+            const cardBody = document.querySelector('.card-body');
+            cardBody.appendChild(errorDiv);
+            
+            // Останавливаем обновление статуса
+            clearInterval(intervalId);
+        }
+        
+        // Обновляем статус каждые 2 секунды
+        updateStatus(); // Сразу проверяем статус
+        const intervalId = setInterval(updateStatus, 2000);
+        
+        // Очищаем интервал при уходе со страницы
+        window.addEventListener('beforeunload', () => {
+            clearInterval(intervalId);
+        });
+    </script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

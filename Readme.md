@@ -21,7 +21,7 @@ docker-compose up --build
 ```
 
 ## Application preview
-<img src="samples/app_prewiev.jpg">
+<img src="samples/app_preview.jpg">
 
 ## Samples of use
 <img src="samples/Figure_4.png">
@@ -30,35 +30,151 @@ docker-compose up --build
 <img src="samples/Figure_1.png">
 
 ## Application architecture
+
+### 1. Project structure
 ```
 .
 ├── main.py                # FastAPI application
 ├── style_transfer.py      # Neural style transfer implementation with MPS support
-├── templates/
-│   └── index.html         # HTML template
+├── templates/             # HTML-templates Jinja2
+│   ├── index.html         # HTML template of main page
+│   ├── status.html        # HTML template of task status page
+│   └── error.html         # HTML template of error page
 ├── static/
-│   └── css/
-│       └── style.css      # CSS styles
+│   ├── css/
+│   │   ├── style.css      # Main CSS styles
+│   │   └── preview.css    # Styles for images preview
+│   └── js/                
+│       └── preview.js     # Script for images preview
 ├── uploads/               # Uploaded images (created at runtime)
 ├── results/               # Result images (created at runtime)
+├── tasks/                 # Task statuses in JSON format (created at runtime)
+├── __pycache__/           # Python cache (created at runtime)
 ├── requirements.txt       # Python dependencies
 ├── Dockerfile             # Docker configuration
 ├── docker-compose.yml     # Docker Compose configuration
-└── README.md              # Current file
+├── .dockerignore          # List of objects to remoove from Docker-image
+├── .gitignore             # List of objects to remoove from logging in git
+└── README.md              # Project documentation
 ```
 
-## Explanation of the algorithm
-The model is built with using of transfer learning based on layers of architecture VGG19 pretrained on imagenet pictures.
-These layers are used to get representations of the content and style of the image.
-In the architecture used, the initial layers define the basic images, 
-and the following layers drill down and define finer details
+### 2. Schema of `main.py` (FastAPI)
+```mermaid
+%% main.py - FastAPI Neural Style Transfer Service
+flowchart TD
+    %% Основные компоненты
+    A[FastAPI App] --> B[Настройка]
+    A --> C[Маршруты]
+    A --> D[Фоновые задачи]
 
-Computation of the Gram matrix for a given tensor, that representing activations from a neural network, 
-is used to estimate textures and style of an image.
-By comparing the Gram matrices of the source style and the target image, 
-we can evaluate how well the target image matches the style of the source image.
+    %% Настройка
+    B --> B1[Статические файлы]
+    B --> B2[Шаблоны Jinja2]
+    B --> B3[Директории: uploads, results, tasks]
+    B --> B4[Логирование]
 
-Style transfer is accomplished by using a modified gradient optimization method Adam, 
-minimizing the MSE loss function, which defines the difference between the current state and the target style.
-Computation of loss function also uses regularisation with image total variation, 
-which helps to fix an artefacts when long-time algorithm using.
+    %% Маршруты
+    C --> C1["GET /"]
+    C --> C2["POST /transfer"]
+    C --> C3["GET /status/{task_id}"]
+    C --> C4["GET /task-status/{task_id}"]
+    C --> C5["GET /results/{file_path}"]
+    C --> C6["GET /uploads/{file_path}"]
+
+    %% Описание маршрутов
+    C1 -->|"Главная страница с формой\nили результатом"| C1a[Шаблон index.html]
+    C2 -->|"Запуск стилизации\nв фоне"| C2a[run_style_transfer]
+    C3 -->|"Страница статуса задачи"| C3a[Шаблон status.html]
+    C4 -->|"API статус задачи"| C4a[JSON]
+    C5 -->|"Файл результата"| C5a[FileResponse]
+    C6 -->|"Загруженные файлы"| C6a[FileResponse]
+
+    %% Фоновые задачи
+    D --> D1[run_style_transfer]
+    D1 --> D1a[HighQualityStyleTransfer]
+    D1 --> D1b[Обновление статуса задачи]
+    D1 --> D1c[Сохранение результата]
+```
+
+### 3. Schema of `style_transfer.py`
+```mermaid
+%% Neural Style Transfer Algorithm Flow
+flowchart TD
+    %% Входные данные
+    A[Content Image] --> B[Загрузка и\nпредобработка]
+    C[Style Image] --> B
+
+    %% Основной алгоритм
+    B -->|Тензор 3×256×256| D[VGG19\nFeature Extraction]
+    D --> E[Вычисление\nГрам-матриц стиля]
+    D --> F[Вычисление\nпотери контента]
+    E --> G[Вычисление\nпотери стиля]
+    F --> H[Общая функция потерь]
+    G --> H
+
+    %% Оптимизация
+    H --> I[Adam Optimizer]
+    I -->|Итерации| J[Обновление\nстилизуемого изображения]
+    J -->|Callback| K[Промежуточные\nрезультаты]
+    J -->|После N шагов| L[Стилизованное\nизображение]
+
+    %% Постобработка
+    L --> M[Сохранение цвета\nи яркости]
+    M --> N[Конвертация в PIL.Image]
+    N --> O[Сохранение результата]
+
+    %% Стили
+    classDef input fill:#f9f,stroke:#333;
+    classDef vgg fill:#bbf,stroke:#333;
+    classDef loss fill:#f96,stroke:#333;
+    classDef opt fill:#6f9,stroke:#333;
+    classDef output fill:#9cf,stroke:#333;
+
+    %% class A,C input;
+    %% class D vgg;
+    %% class E,F,G,H loss;
+    %% class I,J opt;
+    %% class O output;
+
+    %% Подписи этапов
+    subgraph Этапы["Основные этапы алгоритма"]
+        direction TB
+        P1["1. Предобработка"] --> P2["2. Извлечение признаков"]
+        P2 --> P3["3. Вычисление потерь"]
+        P3 --> P4["4. Оптимизация"]
+        P4 --> P5["5. Постобработка"]
+    end
+```
+
+### 4. Data flow
+```mermaid
+%% Поток данных в приложении
+sequenceDiagram
+    participant User as Пользователь
+    participant Frontend as Браузер
+    participant Backend as FastAPI (main.py)
+    participant StyleTransfer as style_transfer.py
+    participant FS as Файловая система
+
+    User->>Frontend: Загружает изображения (content + style)
+    Frontend->>Backend: POST /transfer (multipart/form-data)
+    Backend->>FS: Сохраняет изображения в uploads/
+    Backend->>Backend: Создает задачу (task_id)
+    Backend->>StyleTransfer: Запускает run_style_transfer() в фоне
+    Backend-->>Frontend: Перенаправляет на /status/{task_id}
+
+    loop Обновление статуса
+        Frontend->>Backend: GET /task-status/{task_id} (AJAX)
+        Backend-->>Frontend: JSON {"progress": X, "status": "processing"}
+    end
+
+    StyleTransfer->>StyleTransfer: Выполняет стилизацию (steps итераций)
+    StyleTransfer->>FS: Сохраняет результат в results/
+    StyleTransfer->>Backend: Обновляет статус задачи (completed)
+    Backend-->>Frontend: Перенаправляет на /?result=result_{id}.jpg
+
+    Frontend->>Backend: GET /results/result_{id}.jpg
+    Backend->>FS: Читает файл результата
+    Backend-->>Frontend: Отправляет изображение
+    Frontend->>User: Отображает результат
+```
