@@ -5,12 +5,33 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 import torchvision.models as models
 from PIL import Image
-import matplotlib.pyplot as plt
 import numpy as np
 import time
+import logging
 
-# Set device
-device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Set device - prefer MPS on Mac, then CPU
+def get_device():
+    if torch.backends.mps.is_available():
+        logger.info("MPS (Apple Metal) is available - using for acceleration")
+        return torch.device("mps")
+    elif torch.cuda.is_available():
+        return torch.device("cuda")
+    else:
+        logger.info("MPS not available - falling back to CPU")
+        return torch.device("cpu")
+
+device = get_device()
+logger.info(f"Using device: {device}")
+
+# Дополнительные оптимизации для MPS
+if device.type == "mps":
+    # Уменьшаем размер батча для экономии памяти на MPS
+    torch.mps.empty_cache()
+    logger.info("MPS cache cleared for optimal performance")
 
 # Image loader that preserves original dimensions
 class ImageLoader:
@@ -137,78 +158,97 @@ class HighQualityStyleTransfer:
         rgb = torch.matmul(yuv_reshaped, transform.t())
         return rgb.clamp(0, 1).reshape(b, h, w, 3).permute(0, 3, 1, 2)
 
-    def transfer(self, content_path, style_path, steps=200):
-        loader = ImageLoader()
-        content_img, content_size = loader.load(content_path)
-        style_img, _ = loader.load(style_path)
+    def transfer(self, content_path, style_path, steps=200, style_strength: float = 1.0):
+        """
+        Выполняет перенос стиля с одного изображения на другое.
+        
+        Args:
+            content_path: Путь к изображению контента
+            style_path: Путь к изображению стиля
+            steps: Количество итераций оптимизации
+            style_strength: Сила стилизации (0.0-1.0), где 0 - сохраняет оригинальные цвета
+        
+        Returns:
+            Тензор с результатом стилизации
+        """
+        try:
+            logger.info(f"Starting style transfer: content={content_path}, style={style_path}, steps={steps}, style_strength={style_strength}")
+            
+            loader = ImageLoader()
+            content_img, content_size = loader.load(content_path)
+            style_img, _ = loader.load(style_path)
 
-        orig_h, orig_w = content_size[1], content_size[0]
+            orig_h, orig_w = content_size[1], content_size[0]
 
-        # Resize для обработки (сохраняем пропорции)
-        content_resized = self.resize_to_max(content_img)
-        style_resized = self.resize_to_max(style_img)
+            # Resize для обработки (сохраняем пропорции)
+            content_resized = self.resize_to_max(content_img)
+            style_resized = self.resize_to_max(style_img)
 
-        # Инициализация выхода
-        noise = torch.randn_like(content_resized) * self.noise_factor
-        output = (content_resized * (1 - self.noise_factor) + noise).requires_grad_(True)
-
-        with torch.no_grad():
-            style_features = self.get_features(style_resized)
-            content_features = self.get_features(content_resized)
-            style_targets = {k: self.gram_matrix(v) for k, v in style_features.items()}
-            content_target = content_features['content']
-
-        optimizer = optim.Adam([output], lr=0.05)
-
-        start_time = time.time()
-        for i in range(steps):
-            output_features = self.get_features(output)
-
-            style_loss = 0
-            for k, v in output_features.items():
-                if k.startswith('style_'):
-                    style_loss += F.mse_loss(self.gram_matrix(v), style_targets[k])
-            style_loss *= self.style_weight
-
-            content_loss = F.mse_loss(output_features['content'], content_target) * self.content_weight
-            tv_loss = self.total_variation_loss(output) * self.tv_weight
-
-            total_loss = style_loss + content_loss + tv_loss
-
-            optimizer.zero_grad()
-            total_loss.backward()
-            optimizer.step()
+            # Инициализация выхода
+            noise = torch.randn_like(content_resized) * self.noise_factor
+            output = (content_resized * (1 - self.noise_factor) + noise).requires_grad_(True)
 
             with torch.no_grad():
-                output.clamp_(0, 1)
+                style_features = self.get_features(style_resized)
+                content_features = self.get_features(content_resized)
+                style_targets = {k: self.gram_matrix(v) for k, v in style_features.items()}
+                content_target = content_features['content']
 
-            if i % 50 == 0:
-                print(f"Step {i}, Loss: {total_loss.item():.2f}")
+            optimizer = optim.Adam([output], lr=0.05)
 
-        print(f"Style transfer completed in {time.time() - start_time:.2f} seconds")
+            start_time = time.time()
+            for i in range(steps):
+                output_features = self.get_features(output)
 
-        # ===== ИСПРАВЛЕНИЕ: сначала денормализуем, потом YUV, потом resize =====
-        # Денормализуем output и content в диапазон [0,1], формат NCHW
-        output_denorm = loader.denormalize(output)  # HWC [0,1]
-        content_denorm = loader.denormalize(content_resized)  # HWC [0,1]
+                style_loss = 0
+                for k, v in output_features.items():
+                    if k.startswith('style_'):
+                        style_loss += F.mse_loss(self.gram_matrix(v), style_targets[k])
+                style_loss *= self.style_weight
 
-        # Переводим в NCHW для YUV-функций
-        output_nchw = output_denorm.permute(2, 0, 1).unsqueeze(0).to(device)
-        content_nchw = content_denorm.permute(2, 0, 1).unsqueeze(0).to(device)
+                content_loss = F.mse_loss(output_features['content'], content_target) * self.content_weight
+                tv_loss = self.total_variation_loss(output) * self.tv_weight
 
-        # Применяем YUV-сохранение цветов к реальным RGB-значениям
-        result = self.preserve_color_luminance(content_nchw, output_nchw, 0.05)
+                total_loss = style_loss + content_loss + tv_loss
 
-        # Resize обратно к оригинальному размеру (сохраняем пропорции!)
-        result = F.interpolate(result, size=(orig_h, orig_w), mode='bilinear', align_corners=False)
-        result = result.squeeze(0).cpu().permute(1, 2, 0).clamp(0, 1)
+                optimizer.zero_grad()
+                total_loss.backward()
+                optimizer.step()
 
-        # Лёгкое усиление контраста (опционально)
-        mean_val = result.mean()
-        result = (result - mean_val) * 1.75 + mean_val  # коэффициент 1.15 — настройте под себя
-        result = result.clamp(0, 1)
+                with torch.no_grad():
+                    output.clamp_(0, 1)
 
-        return result
+                if i % 50 == 0:
+                    logger.info(f"Step {i}, Loss: {total_loss.item():.2f}")
+
+            logger.info(f"Style transfer completed in {time.time() - start_time:.2f} seconds")
+
+            # ===== ИСПРАВЛЕНИЕ: сначала денормализуем, потом YUV, потом resize =====
+            # Денормализуем output и content в диапазон [0,1], формат NCHW
+            output_denorm = loader.denormalize(output)  # HWC [0,1]
+            content_denorm = loader.denormalize(content_resized)  # HWC [0,1]
+
+            # Переводим в NCHW для YUV-функций
+            output_nchw = output_denorm.permute(2, 0, 1).unsqueeze(0).to(device)
+            content_nchw = content_denorm.permute(2, 0, 1).unsqueeze(0).to(device)
+
+            # Применяем YUV-сохранение цветов с учетом style_strength
+            result = self.preserve_color_luminance(content_nchw, output_nchw, style_strength)
+
+            # Resize обратно к оригинальному размеру (сохраняем пропорции!)
+            result = F.interpolate(result, size=(orig_h, orig_w), mode='bilinear', align_corners=False)
+            result = result.squeeze(0).cpu().permute(1, 2, 0).clamp(0, 1)
+
+            # Лёгкое усиление контраста (опционально)
+            mean_val = result.mean()
+            result = (result - mean_val) * 1.75 + mean_val
+            result = result.clamp(0, 1)
+
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error during style transfer: {str(e)}", exc_info=True)
+            raise
 
 
 def tensor_to_image(tensor):
@@ -217,35 +257,42 @@ def tensor_to_image(tensor):
     return Image.fromarray(tensor)
 
 
-# Main execution
+# Main execution (для тестирования)
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    
     content_path = 'images/HSE.jpg'
     style_path = 'images/9val.jpg'
 
-    content_img = Image.open(content_path)
-    style_img = Image.open(style_path)
+    try:
+        content_img = Image.open(content_path)
+        style_img = Image.open(style_path)
 
-    plt.figure(figsize=(15, 5))
-    plt.subplot(1, 3, 1)
-    plt.imshow(content_img)
-    plt.title('Content Image')
-    plt.axis('off')
-    plt.subplot(1, 3, 2)
-    plt.imshow(style_img)
-    plt.title('Style Image')
-    plt.axis('off')
+        plt.figure(figsize=(15, 5))
+        plt.subplot(1, 3, 1)
+        plt.imshow(content_img)
+        plt.title('Content Image')
+        plt.axis('off')
+        plt.subplot(1, 3, 2)
+        plt.imshow(style_img)
+        plt.title('Style Image')
+        plt.axis('off')
 
-    print("\n--- High quality style transfer with YUV color preservation ---")
-    transfer = HighQualityStyleTransfer()
-    result = transfer.transfer(content_path, style_path, steps=1000)
+        print("\n--- High quality style transfer with YUV color preservation ---")
+        transfer = HighQualityStyleTransfer()
+        result = transfer.transfer(content_path, style_path, steps=200, style_strength=1.0)
 
-    result_img = tensor_to_image(result)
-    plt.subplot(1, 3, 3)
-    plt.imshow(result_img)
-    plt.title('Styled Result')
-    plt.axis('off')
-    plt.tight_layout()
-    plt.show()
+        result_img = tensor_to_image(result)
+        plt.subplot(1, 3, 3)
+        plt.imshow(result_img)
+        plt.title('Styled Result')
+        plt.axis('off')
+        plt.tight_layout()
+        plt.show()
 
-    result_img.save('styled_result.jpg')
-    print("Result saved as 'styled_result.jpg'")
+        result_img.save('styled_result.jpg')
+        print("Result saved as 'styled_result.jpg'")
+        
+    except Exception as e:
+        print(f"Error during test execution: {str(e)}")
+        logger.error(f"Error during test execution: {str(e)}", exc_info=True)

@@ -4,19 +4,48 @@ Project realises an algorithm described in article
 "A Neural Algorithm of Artistic Style" (https://arxiv.org/abs/1508.06576)
 
 ## Usage instruction
+
+On Mac with MPS: 
 ```Bash
 git clone https://github.com/BondusS/Image-neural-style-transfer.git
 cd Image-neural-style-transfer
 pip install -r requirements.txt
-# Tune params and image links in style_transfer.py
-python style_transfer.py
+uvicorn main:app --reload
 ```
 
+On other devices:
+```Bash
+git clone https://github.com/BondusS/Image-neural-style-transfer.git
+cd Image-neural-style-transfer
+docker-compose up --build
+```
+
+## Application preview
+<img src="samples/app_prewiev.jpg">
+
 ## Samples of use
-<img src="results/Figure_4.png">
-<img src="results/Figure_6.png">
-<img src="results/Figure_9.png">
-<img src="results/Figure_1.png">
+<img src="samples/Figure_4.png">
+<img src="samples/Figure_6.png">
+<img src="samples/Figure_9.png">
+<img src="samples/Figure_1.png">
+
+## Application architecture
+```
+.
+├── main.py                # FastAPI application
+├── style_transfer.py      # Neural style transfer implementation with MPS support
+├── templates/
+│   └── index.html         # HTML template
+├── static/
+│   └── css/
+│       └── style.css      # CSS styles
+├── uploads/               # Uploaded images (created at runtime)
+├── results/               # Result images (created at runtime)
+├── requirements.txt       # Python dependencies
+├── Dockerfile             # Docker configuration
+├── docker-compose.yml     # Docker Compose configuration
+└── README.md              # Current file
+```
 
 ## Explanation of the algorithm
 The model is built with using of transfer learning based on layers of architecture VGG19 pretrained on imagenet pictures.
