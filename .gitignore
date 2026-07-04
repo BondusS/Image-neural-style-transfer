@@ -1,0 +1,19 @@
+# IDE
+.idea/
+
+# macOS
+.DS_Store
+
+# Virtual environments
+venv/
+.env/
+
+# PyTorch model files
+*.pt
+*.pth
+
+# Generated images and results
+styled_result.jpg
+
+# Logs
+*.log

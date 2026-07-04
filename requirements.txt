@@ -1,0 +1,9 @@
+# Base dependencies for neural style transfer
+torch>=2.0.0         # PyTorch with MPS support for Apple Silicon
+torchvision>=0.15.0  # Torchvision for image transformations and models
+numpy>=1.22.0        # Numerical operations
+Pillow>=9.0.0        # PIL for image handling
+matplotlib>=3.5.0    # For visualization
+
+# Optional: accelerate training on Apple Silicon
+torch-backends-mps   # Included in PyTorch 2.0+ for Apple Metal support
