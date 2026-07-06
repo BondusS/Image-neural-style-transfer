@@ -13,6 +13,8 @@ from typing import Optional, Dict
 import json
 from datetime import datetime
 import asyncio
+from prometheus_client import generate_latest, Counter, Histogram, Enum # Импорт Prometheus
+from starlette.responses import Response # Импорт Response для эндпоинта /metrics
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -60,15 +62,34 @@ from style_transfer import HighQualityStyleTransfer, tensor_to_image
 # Глобальный словарь для отслеживания задач
 tasks_status: Dict[str, Dict] = {}
 
+# Метрики Prometheus
+TASK_STATUS_METRIC = Enum(
+    'style_transfer_task_status', 'Status of style transfer tasks',
+    ['task_id'],
+    states=['queued', 'processing', 'completed', 'failed']
+)
+TASK_DURATION_SECONDS = Histogram(
+    'style_transfer_task_duration_seconds', 'Duration of style transfer tasks in seconds',
+    ['task_id', 'status']
+)
+
+# Эндпоинт для метрик Prometheus
+@app.get("/metrics")
+async def metrics():
+    return Response(generate_latest(), media_type="text/plain")
+
+
 # Функция для выполнения стилизации в фоне
 def run_style_transfer(task_id: str, content_path: str, style_path: str, result_path: str, steps: int, style_strength: float):
     """Выполняет стилизацию в фоновом режиме и обновляет статус"""
+    start_task_time = datetime.now() # Замеряем время начала выполнения задачи
     try:
+        TASK_STATUS_METRIC.labels(task_id=task_id).state('processing')
         # Обновляем статус задачи
         tasks_status[task_id] = {
             "status": "processing",
             "progress": 0,
-            "start_time": datetime.now().isoformat(),
+            "start_time": start_task_time.isoformat(),
             "content_path": content_path,
             "style_path": style_path,
             "result_path": None,
@@ -127,6 +148,8 @@ def run_style_transfer(task_id: str, content_path: str, style_path: str, result_
                 json.dump(tasks_status[task_id], f, indent=2)
                 
             logger.info(f"Task {task_id} status updated to completed")
+            TASK_STATUS_METRIC.labels(task_id=task_id).state('completed')
+            TASK_DURATION_SECONDS.labels(task_id=task_id, status='completed').observe((datetime.now() - start_task_time).total_seconds())
             
         except Exception as e:
             logger.error(f"Error saving result: {str(e)}", exc_info=True)
@@ -139,6 +162,8 @@ def run_style_transfer(task_id: str, content_path: str, style_path: str, result_
             # Сохраняем статус в файл
             with open(TASKS_DIR / f"{task_id}.json", "w") as f:
                 json.dump(tasks_status[task_id], f, indent=2)
+            TASK_STATUS_METRIC.labels(task_id=task_id).state('failed')
+            TASK_DURATION_SECONDS.labels(task_id=task_id, status='failed').observe((datetime.now() - start_task_time).total_seconds())
         
         # Сохраняем статус в файл
         with open(TASKS_DIR / f"{task_id}.json", "w") as f:
@@ -174,6 +199,8 @@ def run_style_transfer(task_id: str, content_path: str, style_path: str, result_
             logger.info(f"Task {task_id} status updated to failed")
         except Exception as file_error:
             logger.error(f"Error saving task status: {str(file_error)}", exc_info=True)
+        TASK_STATUS_METRIC.labels(task_id=task_id).state('failed')
+        TASK_DURATION_SECONDS.labels(task_id=task_id, status='failed').observe((datetime.now() - start_task_time).total_seconds())
 
 
 @app.post("/transfer")
@@ -219,6 +246,7 @@ async def style_transfer(
         with open(TASKS_DIR / f"{task_id}.json", "w") as f:
             json.dump(tasks_status[task_id], f)
         
+        TASK_STATUS_METRIC.labels(task_id=task_id).state('queued')
         # Запускаем обработку в фоновом режиме
         background_tasks.add_task(
             run_style_transfer,

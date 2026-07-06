@@ -5,23 +5,33 @@ Project realises an algorithm described in article
 
 ## Usage instruction
 
-On Mac with MPS: 
+To run with MPS or CUDA support: 
 ```Bash
 git clone https://github.com/BondusS/Image-neural-style-transfer.git
 cd Image-neural-style-transfer
 pip install -r requirements.txt
-uvicorn main:app --reload
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+docker-compose up -d --build prometheus grafana
 ```
 
-On other devices:
+Run with docker (CPU only support):
 ```Bash
 git clone https://github.com/BondusS/Image-neural-style-transfer.git
 cd Image-neural-style-transfer
 docker-compose up --build
 ```
 
+## Services available
+* `Main application` - http://127.0.0.1:8000 (to use application go here)
+* `Grafana` - http://127.0.0.1:3000 (resources usage dashboard)
+* `Prometheus` - http://127.0.0.1:9090
+* `Fastapi endpoints` - http://127.0.0.1:8000/docs
+
 ## Application preview
 <img src="samples/app_preview.jpg">
+
+## Dashboard sample
+<img src="samples/dashboard_preview.jpg">
 
 ## Samples of use
 <img src="samples/Figure_4.png">
