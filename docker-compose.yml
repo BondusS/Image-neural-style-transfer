@@ -6,7 +6,8 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./results:/app/results
-      - ./tasks:/app/tasks # Убедиться, что tasks также монтируется для постоянства и доступности
+      - ./tasks:/app/tasks
+      - ./mlruns:/app/mlruns # Монтируем директорию для MLflow
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
@@ -37,6 +38,17 @@ services:
       - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
+    restart: unless-stopped
+
+  mlflow:
+    image: python:3.9-slim
+    container_name: mlflow
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./mlruns:/mlruns
+    command: >
+      sh -c "pip install mlflow && mlflow ui --host 0.0.0.0 --port 5000 --backend-store-uri file:///mlruns"
     restart: unless-stopped
 
 volumes:

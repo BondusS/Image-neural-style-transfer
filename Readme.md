@@ -9,29 +9,36 @@ To run with MPS or CUDA support:
 ```Bash
 git clone https://github.com/BondusS/Image-neural-style-transfer.git
 cd Image-neural-style-transfer
+
 pip install -r requirements.txt
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 docker-compose up -d --build prometheus grafana
+mlflow ui
 ```
 
 Run with docker (CPU only support):
 ```Bash
 git clone https://github.com/BondusS/Image-neural-style-transfer.git
 cd Image-neural-style-transfer
+
 docker-compose up --build
 ```
 
 ## Services available
 * `Main application` - http://127.0.0.1:8000 (to use application go here)
 * `Grafana` - http://127.0.0.1:3000 (resources usage dashboard)
+* `MlFlow` - http://127.0.0.1:5001 (service usage dashboards & data)
 * `Prometheus` - http://127.0.0.1:9090
 * `Fastapi endpoints` - http://127.0.0.1:8000/docs
 
 ## Application preview
 <img src="samples/app_preview.jpg">
 
-## Dashboard sample
+## Dashboard of resources usage sample
 <img src="samples/dashboard_preview.jpg">
+
+## Service usage data sample
+<img src="samples/mlflow_preview.jpg">
 
 ## Samples of use
 <img src="samples/Figure_4.png">
@@ -59,6 +66,7 @@ docker-compose up --build
 ├── uploads/               # Uploaded images (created at runtime)
 ├── results/               # Result images (created at runtime)
 ├── tasks/                 # Task statuses in JSON format (created at runtime)
+├── mlruns/                # MlFlow scrapped data
 ├── __pycache__/           # Python cache (created at runtime)
 ├── requirements.txt       # Python dependencies
 ├── Dockerfile             # Docker configuration
@@ -77,13 +85,14 @@ flowchart TD
     A[FastAPI App] --> B[Настройка]
     A --> C[Маршруты]
     A --> D[Фоновые задачи]
-    A --> E[Мониторинг]
+    A --> E[Мониторинг и Трекинг]
 
     %% Настройка
     B --> B1[Статические файлы]
     B --> B2[Шаблоны Jinja2]
-    B --> B3[Директории: uploads, results, tasks]
+    B --> B3[Директории: uploads, results, tasks, mlruns]
     B --> B4[Логирование]
+    B --> B5[Инициализация MLflow]
 
     %% Маршруты
     C --> C1["GET /"]
@@ -108,12 +117,15 @@ flowchart TD
     D1 --> D1a[HighQualityStyleTransfer]
     D1 --> D1b[Обновление статуса задачи]
     D1 --> D1c[Сохранение результата]
-    D1 --> D1d[Экспорт метрик задач]
+    D1 --> D1d[Экспорт метрик в Prometheus]
+    D1 --> D1e[Логирование в MLflow\nrun, метрики, ошибки]
 
-    %% Мониторинг
+    %% Мониторинг и Трекинг
     E --> E1[Prometheus Client]
     E1 --> E2[Метрики задач стилизации]
     E1 --> E3[Метрики использования ресурсов]
+    E --> E4[MLflow Tracking]
+    E4 --> E5[Параметры, loss и время выполнения]
 ```
 
 ### 3. Schema of `style_transfer.py`
@@ -175,6 +187,7 @@ sequenceDiagram
     participant Backend as FastAPI (main.py)
     participant StyleTransfer as style_transfer.py
     participant FS as Файловая система
+    participant MLflow as MLflow
     participant Prometheus as Prometheus
 
     User->>Frontend: Загружает изображения (content + style)
@@ -184,14 +197,29 @@ sequenceDiagram
     Backend->>StyleTransfer: Запускает run_style_transfer() в фоне
     Backend-->>Frontend: Перенаправляет на /status/{task_id}
 
+    %% Добавлено взаимодействие с MLflow
+    Backend->>MLflow: start_run(task_id)
+    StyleTransfer->>MLflow: log_params(steps, weights, style_strength, device)
+
     loop Обновление статуса
         Frontend->>Backend: GET /task-status/{task_id} (AJAX)
         Backend-->>Frontend: JSON {"progress": X, "status": "processing"}
+        Backend->>MLflow: log_metric("progress", X)
     end
 
     StyleTransfer->>StyleTransfer: Выполняет стилизацию (steps итераций)
+    
+    %% Логирование финальных метрик
+    StyleTransfer->>MLflow: log_metric("final_total_loss", loss)
+    StyleTransfer->>MLflow: log_metric("transfer_duration_seconds", time)
+    
     StyleTransfer->>FS: Сохраняет результат в results/
-    StyleTransfer->>Backend: Обновляет статус задачи (completed)
+    StyleTransfer->>Backend: Возвращает управление и результат
+    Backend->>Backend: Обновляет статус задачи (completed/failed)
+    
+    %% Завершение работы с MLflow
+    Backend->>MLflow: end_run() (логирование статуса/ошибок)
+    
     Backend-->>Prometheus: Экспортирует метрики (/metrics)
     Backend-->>Frontend: Перенаправляет на /?result=result_{id}.jpg
 
@@ -203,15 +231,30 @@ sequenceDiagram
 
 ### 5. Monitoring Architecture
 ```mermaid
-%% Схема мониторинга
+%% Схема мониторинга и трекинга экспериментов
 flowchart TD
     %% Компоненты
-    A[FastAPI Application] -->|Метрики| B[Prometheus]
-    B -->|Данные| C[Grafana]
-    C -->|Дашборды| D[Пользователь]
+    A[FastAPI Application]
+    B[Prometheus]
+    C[Grafana]
+    E[MLflow]
+    D[Пользователь / Разработчик]
 
-    %% Описание
-    A -->|Экспортирует метрики на| A1["/metrics"
-    HTTP-эндпоинт]
-    B -->|Собирает метрики с| A1
+    %% Системные и инфраструктурные метрики
+    A -->|Экспортирует метрики инфраструктуры| A1["/metrics\n(HTTP-эндпоинт)"]
+    A1 -->|Скрейпинг данных| B
+    B -->|Агрегированные данные| C
+    C -->|Дашборды\nCPU, RAM, RPS, длительность задач| D
+
+    %% Трекинг экспериментов и моделей
+    A -->|Логирует гиперпараметры,\nпотери и прогресс| A2["Локальное хранилище\n/mlruns"]
+    A2 -->|Чтение и отображение\nданных ML| E
+    E -->|UI экспериментов ML\nLoss, настройки алгоритма, ошибки| D
+
+    %% Стилизация для визуального разделения
+    %% classDef infra fill:#f9f2e7,stroke:#e67e22,stroke-width:2px;
+    %% classDef ml fill:#e8f4f8,stroke:#3498db,stroke-width:2px;
+    
+    class B,C infra;
+    class E ml;
 ```

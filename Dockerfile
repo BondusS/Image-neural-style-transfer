@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Create directory for MLflow data
+RUN mkdir -p /app/mlruns && chmod -R 777 /app/mlruns
+
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

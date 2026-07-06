@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,6 +9,7 @@ from PIL import Image
 import numpy as np
 import time
 import logging
+import mlflow
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -158,7 +160,7 @@ class HighQualityStyleTransfer:
         rgb = torch.matmul(yuv_reshaped, transform.t())
         return rgb.clamp(0, 1).reshape(b, h, w, 3).permute(0, 3, 1, 2)
 
-    def transfer(self, content_path, style_path, steps=200, style_strength: float = 1.0, callback=None):
+    def transfer(self, content_path, style_path, steps=200, style_strength: float = 1.0, callback=None, task_id=None):
         """
         Выполняет перенос стиля с одного изображения на другое.
         
@@ -168,12 +170,33 @@ class HighQualityStyleTransfer:
             steps: Количество итераций оптимизации
             style_strength: Сила стилизации (0.0-1.0), где 0 - сохраняет оригинальные цвета
             callback: Функция обратного вызова для обновления прогресса (current_step, total_steps)
+            task_id: Идентификатор задачи для логирования в MLflow
         
         Returns:
             Тензор с результатом стилизации
         """
+        logger.info(f"TRANSFER METHOD CALLED with task_id={task_id}")
+        logger.info(f"Content path: {content_path}, exists: {os.path.exists(content_path)}")
+        logger.info(f"Style path: {style_path}, exists: {os.path.exists(style_path)}")
+        
         try:
             logger.info(f"Starting style transfer: content={content_path}, style={style_path}, steps={steps}, style_strength={style_strength}")
+            
+            # Логируем параметры в MLflow
+            if task_id:
+                mlflow.log_params({
+                    "style_transfer_steps": steps,
+                    "style_strength": style_strength,
+                    "style_weight": self.style_weight,
+                    "content_weight": self.content_weight,
+                    "tv_weight": self.tv_weight,
+                    "noise_factor": self.noise_factor,
+                    "max_size": self.max_size,
+                    "device": str(device)
+                })
+                mlflow.set_tag("task_id", task_id)
+                mlflow.set_tag("model_type", "HighQualityStyleTransfer")
+                mlflow.set_tag("device", str(device))
             
             loader = ImageLoader()
             content_img, content_size = loader.load(content_path)
@@ -227,6 +250,11 @@ class HighQualityStyleTransfer:
                     logger.info(f"Step {i}, Loss: {total_loss.item():.2f}")
 
             logger.info(f"Style transfer completed in {time.time() - start_time:.2f} seconds")
+            
+            # Логируем метрики в MLflow
+            if task_id:
+                mlflow.log_metric("transfer_duration_seconds", time.time() - start_time)
+                mlflow.log_metric("final_total_loss", total_loss.item())
 
             # ===== ИСПРАВЛЕНИЕ: сначала денормализуем, потом YUV, потом resize =====
             # Денормализуем output и content в диапазон [0,1], формат NCHW
@@ -252,7 +280,7 @@ class HighQualityStyleTransfer:
             return result
             
         except Exception as e:
-            logger.error(f"Error during style transfer: {str(e)}", exc_info=True)
+            logger.error(f"Error in transfer method for task {task_id}: {str(e)}", exc_info=True)
             raise
 
 
