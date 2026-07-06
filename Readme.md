@@ -63,8 +63,9 @@ docker-compose up --build
 ├── requirements.txt       # Python dependencies
 ├── Dockerfile             # Docker configuration
 ├── docker-compose.yml     # Docker Compose configuration
-├── .dockerignore          # List of objects to remoove from Docker-image
-├── .gitignore             # List of objects to remoove from logging in git
+├── .dockerignore          # List of objects to exclude from Docker image
+├── .gitignore             # List of objects to exclude from Git
+├── prometheus.yml         # Prometheus configuration for metrics collection
 └── README.md              # Project documentation
 ```
 
@@ -76,6 +77,7 @@ flowchart TD
     A[FastAPI App] --> B[Настройка]
     A --> C[Маршруты]
     A --> D[Фоновые задачи]
+    A --> E[Мониторинг]
 
     %% Настройка
     B --> B1[Статические файлы]
@@ -90,6 +92,7 @@ flowchart TD
     C --> C4["GET /task-status/{task_id}"]
     C --> C5["GET /results/{file_path}"]
     C --> C6["GET /uploads/{file_path}"]
+    C --> C7["GET /metrics"]
 
     %% Описание маршрутов
     C1 -->|"Главная страница с формой\nили результатом"| C1a[Шаблон index.html]
@@ -98,12 +101,19 @@ flowchart TD
     C4 -->|"API статус задачи"| C4a[JSON]
     C5 -->|"Файл результата"| C5a[FileResponse]
     C6 -->|"Загруженные файлы"| C6a[FileResponse]
+    C7 -->|"Экспорт метрик для Prometheus"| C7a[Prometheus Client]
 
     %% Фоновые задачи
     D --> D1[run_style_transfer]
     D1 --> D1a[HighQualityStyleTransfer]
     D1 --> D1b[Обновление статуса задачи]
     D1 --> D1c[Сохранение результата]
+    D1 --> D1d[Экспорт метрик задач]
+
+    %% Мониторинг
+    E --> E1[Prometheus Client]
+    E1 --> E2[Метрики задач стилизации]
+    E1 --> E3[Метрики использования ресурсов]
 ```
 
 ### 3. Schema of `style_transfer.py`
@@ -165,6 +175,7 @@ sequenceDiagram
     participant Backend as FastAPI (main.py)
     participant StyleTransfer as style_transfer.py
     participant FS as Файловая система
+    participant Prometheus as Prometheus
 
     User->>Frontend: Загружает изображения (content + style)
     Frontend->>Backend: POST /transfer (multipart/form-data)
@@ -181,10 +192,26 @@ sequenceDiagram
     StyleTransfer->>StyleTransfer: Выполняет стилизацию (steps итераций)
     StyleTransfer->>FS: Сохраняет результат в results/
     StyleTransfer->>Backend: Обновляет статус задачи (completed)
+    Backend-->>Prometheus: Экспортирует метрики (/metrics)
     Backend-->>Frontend: Перенаправляет на /?result=result_{id}.jpg
 
     Frontend->>Backend: GET /results/result_{id}.jpg
     Backend->>FS: Читает файл результата
     Backend-->>Frontend: Отправляет изображение
     Frontend->>User: Отображает результат
+```
+
+### 5. Monitoring Architecture
+```mermaid
+%% Схема мониторинга
+flowchart TD
+    %% Компоненты
+    A[FastAPI Application] -->|Метрики| B[Prometheus]
+    B -->|Данные| C[Grafana]
+    C -->|Дашборды| D[Пользователь]
+
+    %% Описание
+    A -->|Экспортирует метрики на| A1["/metrics"
+    HTTP-эндпоинт]
+    B -->|Собирает метрики с| A1
 ```
